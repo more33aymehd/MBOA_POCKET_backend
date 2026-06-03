@@ -3,6 +3,7 @@ package com.mboapocket.mboapocket_app.auth;
 import com.mboapocket.mboapocket_app.auth.dto.AuthResponse;
 import com.mboapocket.mboapocket_app.auth.dto.LoginRequest;
 import com.mboapocket.mboapocket_app.auth.dto.RegisterRequest;
+import com.mboapocket.mboapocket_app.auth.dto.VerifyTwoFactorRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +25,11 @@ public class AuthController {
     @PostMapping("/login")
     ResponseEntity<AuthResponse> login(@RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
+    }
+
+    @PostMapping("/verify-2fa")
+    ResponseEntity<AuthResponse> verifyTwoFactor(@RequestBody VerifyTwoFactorRequest request) {
+        return ResponseEntity.ok(authService.verifyTwoFactor(request));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

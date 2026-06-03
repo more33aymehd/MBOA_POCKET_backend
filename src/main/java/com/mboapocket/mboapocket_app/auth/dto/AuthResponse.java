@@ -14,4 +14,7 @@ public class AuthResponse {
     private Long userId;
     private String nom;
     private String email;
+    // 2FA
+    private boolean requiresTwoFactor;
+    private String tempToken;
 }
