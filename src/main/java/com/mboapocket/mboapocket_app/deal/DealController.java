@@ -20,16 +20,25 @@ public class DealController {
     ResponseEntity<List<DealResponse>> nearby(
             @RequestParam double lat,
             @RequestParam double lng,
-            @RequestParam(defaultValue = "10") double rayon,
+            @RequestParam(defaultValue = "50") double rayon,
             @RequestParam(required = false) String categorie) {
 
         List<DealResponse> deals = (categorie != null && !categorie.isBlank() && !"TOUS".equalsIgnoreCase(categorie))
                 ? dealService.getNearbyByCategorie(lat, lng, rayon, categorie)
                 : dealService.getNearby(lat, lng, rayon);
 
+        if (deals.isEmpty()) deals = dealService.getAll(lat, lng);
+
         return ResponseEntity.ok(deals);
     }
 
+    @GetMapping("/ai-sort")
+    ResponseEntity<List<DealResponse>> aiSort(
+            @RequestParam double lat,
+            @RequestParam double lng,
+            @RequestParam(defaultValue = "15") double rayon) {
+        return ResponseEntity.ok(dealService.getNearbySortedByAI(lat, lng, rayon));
+    }
     @GetMapping("/{id}")
     ResponseEntity<DealResponse> getById(@PathVariable Long id) {
         return ResponseEntity.ok(dealService.getById(id));

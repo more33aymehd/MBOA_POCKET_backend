@@ -1,13 +1,20 @@
 package com.mboapocket.mboapocket_app.deal;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mboapocket.mboapocket_app.deal.dto.DealRequest;
 import com.mboapocket.mboapocket_app.deal.dto.DealResponse;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.LocalDate;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -15,6 +22,13 @@ import java.util.stream.Collectors;
 public class DealService {
 
     private final DealRepository dealRepo;
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    @Value("${groq.api.key}")
+    private String groqApiKey;
+
+    @Value("${groq.model}")
+    private String groqModel;
 
     // ── Seed deals Yaoundé au démarrage si la table est vide ──
     @PostConstruct
@@ -88,6 +102,101 @@ public class DealService {
                 .adresse(req.getAdresse())
                 .build();
         return toResponse(dealRepo.save(deal), 0, 0);
+    }
+
+    public List<DealResponse> getAll(double lat, double lng) {
+        return dealRepo.findAll().stream()
+                .map(d -> toResponse(d, lat, lng))
+                .sorted(Comparator.comparingDouble(DealResponse::getRating).reversed())
+                .collect(Collectors.toList());
+    }
+
+    public List<DealResponse> getNearbySortedByAI(double lat, double lng, double rayonKm) {
+        List<DealResponse> deals = getNearby(lat, lng, rayonKm);
+        if (deals.isEmpty()) return deals;
+        try {
+            return rankByAI(deals);
+        } catch (Exception e) {
+            // Fallback : tri par réduction décroissante si l'IA échoue
+            return deals.stream()
+                .sorted(Comparator.comparingDouble(DealService::parseReduction).reversed())
+                .collect(Collectors.toList());
+        }
+    }
+
+    private List<DealResponse> rankByAI(List<DealResponse> deals) throws Exception {
+        StringBuilder dealsJson = new StringBuilder("[");
+        for (int i = 0; i < deals.size(); i++) {
+            DealResponse d = deals.get(i);
+            dealsJson.append(String.format(
+                "{\"id\":%d,\"titre\":\"%s\",\"reduction\":\"%s\",\"distanceKm\":%.1f,\"rating\":%.1f,\"categorie\":\"%s\"}",
+                d.getId(), d.getTitre(), d.getReduction() != null ? d.getReduction() : "",
+                d.getDistanceKm(), d.getRating(), d.getCategorie()
+            ));
+            if (i < deals.size() - 1) dealsJson.append(",");
+        }
+        dealsJson.append("]");
+
+        String prompt = "Tu es un assistant financier pour l'application Mboapocket au Cameroun. " +
+            "Voici une liste de bons plans à proximité de l'utilisateur : " + dealsJson +
+            "\nClasse-les du meilleur au moins bon en tenant compte : 1) du pourcentage de réduction " +
+            "(plus c'est élevé, mieux c'est), 2) de la distance (plus c'est proche, mieux c'est), " +
+            "3) du rating. Retourne UNIQUEMENT un tableau JSON sans explication, format strict : " +
+            "[{\"id\":1,\"score\":1,\"raison\":\"Meilleure réduction (-30%) et proche\"},...] " +
+            "score=1 étant le meilleur deal. Réponds uniquement avec le JSON.";
+
+        String requestBody = mapper.writeValueAsString(Map.of(
+            "model", groqModel,
+            "messages", List.of(Map.of("role", "user", "content", prompt)),
+            "temperature", 0.2,
+            "max_tokens", 800
+        ));
+
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create("https://api.groq.com/openai/v1/chat/completions"))
+            .header("Authorization", "Bearer " + groqApiKey)
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+            .build();
+
+        HttpResponse<String> response = HttpClient.newHttpClient()
+            .send(request, HttpResponse.BodyHandlers.ofString());
+
+        JsonNode root = mapper.readTree(response.body());
+        String content = root.path("choices").get(0).path("message").path("content").asText();
+
+        // Extraire le JSON du contenu
+        int start = content.indexOf('[');
+        int end = content.lastIndexOf(']') + 1;
+        if (start == -1 || end == 0) return deals;
+
+        JsonNode aiRanking = mapper.readTree(content.substring(start, end));
+        Map<Long, DealResponse> dealsById = deals.stream()
+            .collect(Collectors.toMap(DealResponse::getId, d -> d));
+
+        List<DealResponse> sorted = new ArrayList<>();
+        for (JsonNode node : aiRanking) {
+            long id = node.path("id").asLong();
+            DealResponse deal = dealsById.get(id);
+            if (deal != null) {
+                deal.setAiScore(node.path("score").asInt());
+                deal.setAiRaison(node.path("raison").asText());
+                sorted.add(deal);
+            }
+        }
+        // Ajouter les deals non retournés par l'IA en fin de liste
+        deals.stream().filter(d -> sorted.stream().noneMatch(s -> s.getId().equals(d.getId())))
+            .forEach(sorted::add);
+        return sorted;
+    }
+
+    private static double parseReduction(DealResponse d) {
+        if (d.getReduction() == null) return 0;
+        try {
+            return Double.parseDouble(d.getReduction().replace("%", "").replace("+", "").trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     public DealResponse getById(Long id) {

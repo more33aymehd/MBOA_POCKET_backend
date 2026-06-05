@@ -18,5 +18,7 @@ public class DealResponse {
     private Double rating;
     private Integer nbAvis;
     private String adresse;
-    private Double distanceKm;   // calculée dynamiquement
+    private Double distanceKm;
+    private Integer aiScore;
+    private String  aiRaison;
 }

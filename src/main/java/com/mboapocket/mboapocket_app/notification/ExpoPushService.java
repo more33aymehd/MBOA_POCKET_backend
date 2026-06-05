@@ -13,13 +13,21 @@ import java.util.Map;
 public class ExpoPushService {
 
     private final RestClient restClient;
+    private final DeviceTokenRepository deviceTokenRepository;
 
-    public ExpoPushService() {
+    public ExpoPushService(DeviceTokenRepository deviceTokenRepository) {
+        this.deviceTokenRepository = deviceTokenRepository;
         this.restClient = RestClient.builder()
                 .baseUrl("https://exp.host")
                 .defaultHeader("Accept", "application/json")
                 .defaultHeader("Accept-Encoding", "gzip, deflate")
                 .build();
+    }
+
+    public void sendToUser(Long userId, String title, String body) {
+        List<String> tokens = deviceTokenRepository.findByUserId(userId)
+                .stream().map(DeviceToken::getPushToken).toList();
+        sendToMany(tokens, title, body, Map.of());
     }
 
     public void send(String pushToken, String title, String body, Map<String, String> data) {
